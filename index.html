@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Flash & Voice Timer Pro</title>
+    <style>
+        :root { --bg: #0f172a; --accent: #22c55e; --timer-color: #38bdf8; }
+        body { 
+            background: var(--bg); color: white; font-family: 'Segoe UI', sans-serif; 
+            margin: 0; display: flex; flex-direction: column; align-items: center; 
+            justify-content: center; height: 100vh; overflow: hidden; transition: background 0.05s;
+        }
+        #setup {
+            position: fixed; inset: 0; background: var(--bg);
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; z-index: 100; text-align: center; padding: 20px;
+        }
+        .timer-display { font-size: 9rem; font-weight: 800; color: var(--timer-color); margin: 0; line-height: 1; }
+        .status-text { color: #ef4444; font-weight: bold; height: 2rem; font-size: 1.2rem; text-transform: uppercase; margin-bottom: 10px; }
+        .input-group { display: flex; gap: 10px; margin-top: 30px; align-items: center; }
+        input { 
+            padding: 15px; border-radius: 15px; border: 2px solid #334155;
+            background: #1e293b; color: white; width: 90px; text-align: center; font-size: 1.5rem; outline: none;
+        }
+        input:focus { border-color: var(--timer-color); }
+        button {
+            padding: 18px 35px; border-radius: 15px; border: none;
+            font-weight: bold; cursor: pointer; font-size: 1.1rem; transition: transform 0.1s;
+        }
+        button:active { transform: scale(0.95); }
+        .btn-unlock { background: var(--accent); color: white; font-size: 1.4rem; box-shadow: 0 10px 20px rgba(34, 197, 94, 0.3); }
+        .btn-start { background: var(--timer-color); color: var(--bg); }
+        .btn-stop { background: #ef4444; color: white; margin-top: 25px; width: 80%; max-width: 300px; box-shadow: 0 5px 15px rgba(239, 68, 68, 0.4); }
+    </style>
+</head>
+<body id="bg">
+
+    <div id="setup">
+        <h1 style="margin-bottom:10px;">Timer Ready</h1>
+        <p style="color:#94a3b8; margin-bottom:30px;">This app requires Camera access<br>to use the Flashlight LED alarm.</p>
+        <button class="btn-unlock" onclick="unlock()">ACTIVATE SYSTEM</button>
+    </div>
+
+    <div id="status" class="status-text"></div>
+    <div class="timer-display" id="c">0</div>
+    
+    <div class="input-group">
+        <input type="number" id="userTime" value="10" inputmode="numeric">
+        <button class="btn-start" onclick="startTimer()">START</button>
+    </div>
+
+    <button class="btn-stop" onclick="stopTimer()">STOP ALARM</button>
+
+    <script>
+        let audioCtx, interval, alarmLoop, stream = null;
+        const display = document.getElementById('c');
+        const bg = document.getElementById('bg');
+        const status = document.getElementById('status');
+
+        function speak(text) {
+            window.speechSynthesis.cancel();
+            const msg = new SpeechSynthesisUtterance(text);
+            msg.rate = 1.1;
+            window.speechSynthesis.speak(msg);
+        }
+
+        async function unlock() {
+            // Audio Context
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            speak("System online");
+            
+            // Flashlight Stream
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                document.getElementById('setup').style.display = 'none';
+            } catch (err) {
+                alert("LED Flashlight requires Camera permission. Please allow it and refresh.");
+            }
+        }
+
+        async function setFlash(state) {
+            if (!stream) return;
+            const track = stream.getVideoTracks()[0];
+            try {
+                await track.applyConstraints({ advanced: [{ torch: state }] });
+            } catch (e) { /* Torch not supported or busy */ }
+        }
+
+        function playBeep() {
+            if(!audioCtx) return;
+            const o = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            o.type = 'square';
+            o.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            o.connect(g); g.connect(audioCtx.destination);
+            g.gain.setValueAtTime(0.6, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            o.start(); o.stop(audioCtx.currentTime + 0.3);
+        }
+
+        function startTimer() {
+            stopTimer();
+            let t = parseInt(document.getElementById('userTime').value) || 10;
+            display.innerText = t;
+            speak("Timer set for " + t + " seconds");
+
+            interval = setInterval(async () => {
+                t--;
+                display.innerText = t;
+                
+                // Voice Countdown
+                if (t <= 3 && t > 0) speak(t.toString());
+                
+                if (t <= 0) {
+                    clearInterval(interval);
+                    status.innerText = "🚨 TIME IS UP 🚨";
+                    
+                    // Persistent Alarm Loop (LED + Sound + Color)
+                    let toggle = false;
+                    alarmLoop = setInterval(async () => {
+                        toggle = !toggle;
+                        bg.style.background = toggle ? "#fbbf24" : "#0f172a"; // Flash Yellow/Dark
+                        display.style.color = toggle ? "#000" : "#38bdf8";
+                        await setFlash(toggle);
+                        if(toggle) {
+                            playBeep();
+                            speak("Time is up");
+                        }
+                    }, 200); // Fast strobe speed
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(interval);
+            clearInterval(alarmLoop);
+            setFlash(false);
+            window.speechSynthesis.cancel();
+            bg.style.background = "#0f172a";
+            display.style.color = "#38bdf8";
+            status.innerText = "";
+            display.innerText = "0";
+        }
+    </script>
+</body>
+</html>
